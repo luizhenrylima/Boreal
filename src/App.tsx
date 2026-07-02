@@ -595,62 +595,68 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
 
     setIsGenerating(true);
 
-    const client: Client = {
-      id: editingQuote?.client.id ?? crypto.randomUUID(),
-      name: draft.name,
-      document: draft.document,
-      phone: draft.phone,
-      email: draft.email,
-      city: draft.city,
-      state: draft.state,
-      projectName: draft.projectName,
-      installationSite: draft.installationSite,
-      notes: draft.notes,
-      partnerId: profile?.partner_id ?? "",
-      createdBy: profile?.id ?? "",
-    };
-    const quote: Quote = {
-      id: editingQuote?.id ?? crypto.randomUUID(),
-      quoteNumber: editingQuote?.quoteNumber ?? `BOR-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`,
-      client,
-      createdBy: editingQuote?.createdBy ?? profile?.id ?? "",
-      product: math.product,
-      width: draft.width,
-      height: draft.height,
-      screens: draft.screens.map((screen) => ({
-        id: screen.id,
-        product: products.find((product) => product.id === screen.productId) ?? math.product,
-        width: screen.width,
-        height: screen.height,
-        label: screen.label,
-      })),
-      includeStructure: draft.includeStructure,
-      includeInstallation: draft.includeInstallation,
-      includeProcessor: draft.includeProcessor,
-      includeFreight: draft.includeFreight,
-      includeTechnicalVisit: draft.includeTechnicalVisit,
-      includeExtendedWarranty: draft.includeExtendedWarranty,
-      processorCost: draft.processorCost,
-      freightCost: draft.freightCost,
-      technicalVisitCost: draft.technicalVisitCost,
-      extendedWarrantyCost: draft.extendedWarrantyCost,
-      marginPercent: draft.marginPercent,
-      discountPercent: draft.discountPercent,
-      status: math.processor.note ? "technical_validation" : "sent",
-      createdAt: new Date().toISOString().slice(0, 10),
-      productImageDataUrl: draft.productImageDataUrl,
-    };
-    addClient(client);
-    if (editingQuote) {
-      updateQuote(quote);
-    } else {
-      addQuote(quote);
+    try {
+      const client: Client = {
+        id: editingQuote?.client.id ?? crypto.randomUUID(),
+        name: draft.name,
+        document: draft.document,
+        phone: draft.phone,
+        email: draft.email,
+        city: draft.city,
+        state: draft.state,
+        projectName: draft.projectName,
+        installationSite: draft.installationSite,
+        notes: draft.notes,
+        partnerId: profile?.partner_id ?? "",
+        createdBy: profile?.id ?? "",
+      };
+      const quote: Quote = {
+        id: editingQuote?.id ?? crypto.randomUUID(),
+        quoteNumber: editingQuote?.quoteNumber ?? `BOR-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`,
+        client,
+        createdBy: editingQuote?.createdBy ?? profile?.id ?? "",
+        product: math.product,
+        width: draft.width,
+        height: draft.height,
+        screens: draft.screens.map((screen) => ({
+          id: screen.id,
+          product: products.find((product) => product.id === screen.productId) ?? math.product,
+          width: screen.width,
+          height: screen.height,
+          label: screen.label,
+        })),
+        includeStructure: draft.includeStructure,
+        includeInstallation: draft.includeInstallation,
+        includeProcessor: draft.includeProcessor,
+        includeFreight: draft.includeFreight,
+        includeTechnicalVisit: draft.includeTechnicalVisit,
+        includeExtendedWarranty: draft.includeExtendedWarranty,
+        processorCost: draft.processorCost,
+        freightCost: draft.freightCost,
+        technicalVisitCost: draft.technicalVisitCost,
+        extendedWarrantyCost: draft.extendedWarrantyCost,
+        marginPercent: draft.marginPercent,
+        discountPercent: draft.discountPercent,
+        status: math.processor.note ? "technical_validation" : "sent",
+        createdAt: new Date().toISOString(),
+        productImageDataUrl: draft.productImageDataUrl,
+      };
+      const result = await saveQuote(client, quote);
+      setMessage(result.message);
+
+      if (!result.ok) return;
+
+      addClient(client);
+      if (editingQuote) {
+        updateQuote(quote);
+      } else {
+        addQuote(quote);
+      }
+      await exportQuotePdf(quote);
+      onDone?.();
+    } finally {
+      setIsGenerating(false);
     }
-    const result = await saveQuote(client, quote);
-    setMessage(result.message);
-    await exportQuotePdf(quote);
-    onDone?.();
-    setIsGenerating(false);
   }
 
   return (

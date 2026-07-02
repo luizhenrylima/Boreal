@@ -351,8 +351,18 @@ export const useBorealStore = create<AppState>((set, get) => ({
     const profile = get().profile;
     const partnerId = profilePartnerId(profile);
 
-    if (!supabase || !profile || !partnerId) {
-      return { ok: true, message: "Cotacao salva localmente." };
+    if (!supabase) {
+      return {
+        ok: false,
+        message: "Cotacao nao foi salva: Supabase nao esta configurado neste ambiente.",
+      };
+    }
+
+    if (!profile || !partnerId) {
+      return {
+        ok: false,
+        message: "Cotacao nao foi salva: usuario sem perfil ou parceiro vinculado no Supabase.",
+      };
     }
 
     const { data: productRow } = await supabase
@@ -389,7 +399,7 @@ export const useBorealStore = create<AppState>((set, get) => ({
       discountPercent: quote.discountPercent,
     });
 
-    const { error: quoteError } = await supabase.from("quotes").upsert({
+    const { data: savedQuote, error: quoteError } = await supabase.from("quotes").upsert({
       id: quote.id,
       partner_id: partnerId,
       client_id: client.id,
@@ -433,10 +443,13 @@ export const useBorealStore = create<AppState>((set, get) => ({
         productImageDataUrl: quote.productImageDataUrl,
         screens: quote.screens,
       }),
-    });
+    }).select("id").single();
 
-    if (quoteError) {
-      return { ok: false, message: `Cliente salvo, mas a cotacao ficou local: ${quoteError.message}` };
+    if (quoteError || !savedQuote) {
+      return {
+        ok: false,
+        message: `Cliente salvo, mas a cotacao nao foi confirmada no Supabase: ${quoteError?.message ?? "sem retorno do banco"}`,
+      };
     }
 
     await supabase.from("quote_events").insert({
