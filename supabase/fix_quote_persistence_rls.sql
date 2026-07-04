@@ -6,11 +6,10 @@ stable
 set search_path = public
 as $$
   select
-    coalesce(auth.jwt() -> 'user_metadata' ->> 'role', '') = 'master_admin'
-    or exists (
+    exists (
       select 1
       from public.profiles
-      where id = auth.uid()
+      where id = (select auth.uid())
         and role = 'master_admin'
     );
 $$;

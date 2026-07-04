@@ -4,7 +4,12 @@ language sql
 stable
 set search_path = public
 as $$
-  select coalesce(auth.jwt() -> 'user_metadata' ->> 'role', '') = 'master_admin';
+  select exists (
+    select 1
+    from public.profiles
+    where id = (select auth.uid())
+      and role = 'master_admin'
+  );
 $$;
 
 drop policy if exists "Users read own profile" on public.profiles;

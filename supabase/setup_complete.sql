@@ -156,13 +156,41 @@ alter table public.service_pricing enable row level security;
 alter table public.quotes enable row level security;
 alter table public.quote_events enable row level security;
 
+grant usage on schema public to authenticated;
+
+revoke all on public.partners from anon;
+revoke all on public.profiles from anon;
+revoke all on public.clients from anon;
+revoke all on public.products from anon;
+revoke all on public.product_formats from anon;
+revoke all on public.processors from anon;
+revoke all on public.service_pricing from anon;
+revoke all on public.quotes from anon;
+revoke all on public.quote_events from anon;
+
+grant select, insert, update, delete on public.partners to authenticated;
+grant select, insert, update, delete on public.profiles to authenticated;
+grant select, insert, update, delete on public.clients to authenticated;
+grant select, insert, update, delete on public.products to authenticated;
+grant select, insert, update, delete on public.product_formats to authenticated;
+grant select, insert, update, delete on public.processors to authenticated;
+grant select, insert, update, delete on public.service_pricing to authenticated;
+grant select, insert, update, delete on public.quotes to authenticated;
+grant select, insert, update, delete on public.quote_events to authenticated;
+
 create or replace function public.is_master_admin()
 returns boolean
 language sql
+security definer
 stable
 set search_path = public
 as $$
-  select coalesce(auth.jwt() -> 'user_metadata' ->> 'role', '') = 'master_admin';
+  select exists (
+    select 1
+    from public.profiles
+    where id = (select auth.uid())
+      and role = 'master_admin'
+  );
 $$;
 
 create or replace function public.current_partner_id()
@@ -174,6 +202,31 @@ set search_path = public
 as $$
   select partner_id from public.profiles where id = auth.uid();
 $$;
+
+create or replace function public.can_manage_partner_quotes()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = (select auth.uid())
+      and (
+        role = 'partner_admin'
+        or can_view_company_quotes = true
+      )
+  );
+$$;
+
+revoke all on function public.is_master_admin() from public, anon;
+revoke all on function public.current_partner_id() from public, anon;
+revoke all on function public.can_manage_partner_quotes() from public, anon;
+grant execute on function public.is_master_admin() to authenticated;
+grant execute on function public.current_partner_id() to authenticated;
+grant execute on function public.can_manage_partner_quotes() to authenticated;
 
 drop policy if exists "Users read own profile" on public.profiles;
 drop policy if exists "Users read own profile or company profiles" on public.profiles;

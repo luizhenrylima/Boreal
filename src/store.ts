@@ -322,30 +322,37 @@ export const useBorealStore = create<AppState>((set, get) => ({
     const profile = get().profile;
     const partnerId = profilePartnerId(profile);
 
+    if (!supabase) {
+      return { ok: false, message: "Cliente nao foi salvo: Supabase nao esta configurado neste ambiente." };
+    }
+
+    if (!profile || !partnerId) {
+      return { ok: false, message: "Cliente nao foi salvo: usuario sem perfil ou parceiro vinculado no Supabase." };
+    }
+
+    const { error } = await supabase.from("clients").upsert(clientPayload(client, profile, partnerId));
+    if (error) {
+      return { ok: false, message: `Cliente nao foi salvo: Supabase recusou: ${error.message}` };
+    }
+
     set((state) => ({
       clients: state.clients.some((item) => item.id === client.id)
         ? state.clients.map((item) => (item.id === client.id ? client : item))
         : [client, ...state.clients],
     }));
 
-    if (!supabase || !profile || !partnerId) {
-      return { ok: true, message: "Cliente salvo localmente." };
-    }
-
-    const { error } = await supabase.from("clients").upsert(clientPayload(client, profile, partnerId));
-    return error
-      ? { ok: false, message: `Cliente salvo localmente. Supabase recusou: ${error.message}` }
-      : { ok: true, message: "Cliente salvo no Supabase." };
+    return { ok: true, message: "Cliente salvo no Supabase." };
   },
   addQuote: (quote) => set((state) => ({ quotes: [quote, ...state.quotes] })),
   updateQuote: (quote) => set((state) => ({ quotes: state.quotes.map((item) => (item.id === quote.id ? quote : item)) })),
   deleteQuote: async (quoteId) => {
-    set((state) => ({ quotes: state.quotes.filter((quote) => quote.id !== quoteId) }));
-    if (!supabase) return { ok: true, message: "Cotacao excluida localmente." };
+    if (!supabase) return { ok: false, message: "Cotacao nao foi excluida: Supabase nao esta configurado neste ambiente." };
     const { error } = await supabase.from("quotes").delete().eq("id", quoteId);
-    return error
-      ? { ok: false, message: `Cotacao removida da tela, mas o Supabase recusou: ${error.message}` }
-      : { ok: true, message: "Cotacao excluida." };
+    if (error) {
+      return { ok: false, message: `Cotacao nao foi excluida: Supabase recusou: ${error.message}` };
+    }
+    set((state) => ({ quotes: state.quotes.filter((quote) => quote.id !== quoteId) }));
+    return { ok: true, message: "Cotacao excluida." };
   },
   saveQuote: async (client, quote) => {
     const profile = get().profile;

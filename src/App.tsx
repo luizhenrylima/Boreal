@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
@@ -48,6 +48,7 @@ import {
   suggestProcessor,
 } from "./calculations";
 import { useBorealStore } from "./store";
+import type { Profile } from "./store";
 import type { Category, Client, Partner, Product, Quote, QuoteStatus, Role } from "./types";
 
 const quoteSchema = z.object({
@@ -301,12 +302,12 @@ function useQuoteMath(draft: Draft) {
       discountPercent: draft.discountPercent,
     });
     return { product, area, panelValue, formatType, pixelLoad, processor, totals };
-  }, [draft]);
+  }, [draft, products]);
 }
 
 function LoginPage({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
-  const [email, setEmail] = useState("parceiro@boreal.com.br");
-  const [password, setPassword] = useState("boreal-demo");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -343,15 +344,15 @@ function LoginPage({ onLogin }: { onLogin: (email: string, password: string) => 
           <div className="space-y-4">
             <Input label="E-mail" value={email} onChange={setEmail} />
             <Input label="Senha" value={password} type="password" onChange={setPassword} />
-            <button className="btn-primary w-full" type="submit" disabled={isSubmitting}>
+            <button className="btn-primary w-full" type="submit" disabled={isSubmitting || !isSupabaseConfigured}>
               {isSubmitting ? "Entrando..." : "Entrar na plataforma"}
             </button>
           </div>
           {message && <p className="mt-4 rounded-md border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">{message}</p>}
           <p className="mt-6 text-sm text-slate-400">
             {isSupabaseConfigured
-              ? "Conectado ao Supabase. Use um usuário criado no Auth e vinculado à tabela profiles."
-              : "Modo demo local. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para usar autenticação e banco reais."}
+              ? "Conectado ao Supabase. Use um usuario criado no Auth e vinculado a tabela profiles."
+              : "Acesso bloqueado: configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para autenticar e salvar no banco."}
           </p>
         </form>
       </section>
@@ -1656,23 +1657,12 @@ function App() {
   const resetData = useBorealStore((state) => state.resetData);
   const profile = useBorealStore((state) => state.profile);
 
-  useEffect(() => {
-    if (!supabase) return;
-
-    void supabase.auth.getSession().then(async ({ data }) => {
-      if (!data.session) return;
-      await loadProfile(data.session.user);
-      setLogged(true);
-      await loadWorkspace();
-    });
-  }, [loadWorkspace]);
-
-  async function loadProfile(user: User) {
-    if (!supabase) return;
+  const loadProfile = useCallback(async (user: User): Promise<Profile> => {
+    if (!supabase) {
+      throw new Error("Supabase nao esta configurado neste ambiente.");
+    }
 
     const email = user.email ?? "";
-    const metadataRole = user.user_metadata?.role === "master_admin" ? "master_admin" : "partner_admin";
-    const metadataName = typeof user.user_metadata?.name === "string" ? user.user_metadata.name : email || "Usuário sem perfil";
 
     const { data, error } = await supabase
       .from("profiles")
@@ -1680,31 +1670,51 @@ function App() {
       .eq("id", user.id)
       .maybeSingle();
 
-    if (error || !data) {
-      setProfile({
-        id: user.id,
-        partner_id: null,
-        name: metadataName,
-        email,
-        role: metadataRole,
-      });
-      return;
+    if (error) {
+      throw new Error(`Nao foi possivel validar seu perfil: ${error.message}`);
     }
 
-    setProfile(data as { id: string; partner_id: string | null; name: string; email: string; role: Role });
-  }
+    if (!data) {
+      throw new Error("Acesso negado: usuario autenticado, mas sem perfil autorizado na tabela profiles.");
+    }
+
+    if (data.role !== "master_admin" && !data.partner_id) {
+      throw new Error("Acesso negado: perfil sem parceiro vinculado.");
+    }
+
+    const profileData = {
+      id: data.id,
+      partner_id: data.partner_id,
+      name: data.name,
+      email: data.email || email,
+      role: data.role as Role,
+    };
+    setProfile(profileData);
+    return profileData;
+  }, [setProfile]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const supabaseClient = supabase;
+
+    void supabaseClient.auth.getSession().then(async ({ data }) => {
+      if (!data.session) return;
+      try {
+        await loadProfile(data.session.user);
+        setLogged(true);
+        await loadWorkspace();
+      } catch {
+        await supabaseClient.auth.signOut();
+        setProfile(null);
+        resetData();
+        setLogged(false);
+      }
+    });
+  }, [loadProfile, loadWorkspace, resetData, setProfile]);
 
   async function handleLogin(email: string, password: string) {
     if (!supabase) {
-      setProfile({
-        id: "user-demo",
-        partner_id: "partner-demo",
-        name: "Admin Parceiro Demo",
-        email,
-        role: "partner_admin",
-      });
-      setLogged(true);
-      return;
+      throw new Error("Supabase nao esta configurado. Configure as variaveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.");
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -1713,9 +1723,16 @@ function App() {
       throw new Error(error.message);
     }
 
-    await loadProfile(data.user);
-    await loadWorkspace();
-    setLogged(true);
+    try {
+      await loadProfile(data.user);
+      await loadWorkspace();
+      setLogged(true);
+    } catch (profileError) {
+      await supabase.auth.signOut();
+      setProfile(null);
+      resetData();
+      throw profileError;
+    }
   }
 
   async function handleLogout() {
