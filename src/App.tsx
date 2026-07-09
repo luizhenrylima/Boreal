@@ -34,7 +34,7 @@ import {
   YAxis,
 } from "recharts";
 import { z } from "zod";
-import { warrantyText } from "./data";
+import { servicePricing, warrantyText } from "./data";
 import { isSupabaseConfigured, supabase } from "./supabaseClient";
 import {
   calculateArea,
@@ -95,6 +95,8 @@ type Draft = {
   includeFreight: boolean;
   includeTechnicalVisit: boolean;
   includeExtendedWarranty: boolean;
+  structureBaseCost: number;
+  installationBaseCost: number;
   processorCost: number;
   freightCost: number;
   technicalVisitCost: number;
@@ -138,6 +140,8 @@ const initialDraft: Draft = {
   includeFreight: false,
   includeTechnicalVisit: false,
   includeExtendedWarranty: false,
+  structureBaseCost: 4050,
+  installationBaseCost: 2430,
   processorCost: 0,
   freightCost: 0,
   technicalVisitCost: 1200,
@@ -222,16 +226,18 @@ function Input({
   value,
   onChange,
   type = "text",
+  disabled = false,
 }: {
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   type?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="space-y-2">
       <span className="label">{label}</span>
-      <input className="field" type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input className="field disabled:cursor-not-allowed disabled:opacity-50" type={type} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -300,6 +306,42 @@ function Toggle({
   );
 }
 
+function money(value: number) {
+  return Number(value.toFixed(2));
+}
+
+function sameMoney(left: number, right: number) {
+  return money(left) === money(right);
+}
+
+function getDefaultServiceBaseCosts(draft: Pick<Draft, "width" | "height" | "productId" | "category">, products: Product[]) {
+  const product = products.find((item) => item.id === draft.productId);
+  const category = product?.category ?? draft.category;
+  const area = calculateArea(draft.width, draft.height);
+
+  return {
+    structureBaseCost: money(
+      area * (category === "indoor" ? servicePricing.indoorStructurePerSqm : servicePricing.outdoorStructurePerSqm),
+    ),
+    installationBaseCost: money(area * servicePricing.installationPerSqm),
+  };
+}
+
+function syncServiceBaseCosts(current: Draft, next: Draft, products: Product[]) {
+  const currentDefaults = getDefaultServiceBaseCosts(current, products);
+  const nextDefaults = getDefaultServiceBaseCosts(next, products);
+
+  return {
+    ...next,
+    structureBaseCost: sameMoney(current.structureBaseCost, currentDefaults.structureBaseCost)
+      ? nextDefaults.structureBaseCost
+      : next.structureBaseCost,
+    installationBaseCost: sameMoney(current.installationBaseCost, currentDefaults.installationBaseCost)
+      ? nextDefaults.installationBaseCost
+      : next.installationBaseCost,
+  };
+}
+
 function useQuoteMath(draft: Draft) {
   const products = useBorealStore((state) => state.products);
   return useMemo(() => {
@@ -319,6 +361,8 @@ function useQuoteMath(draft: Draft) {
       includeFreight: draft.includeFreight,
       includeTechnicalVisit: draft.includeTechnicalVisit,
       includeExtendedWarranty: draft.includeExtendedWarranty,
+      structureBaseCost: draft.structureBaseCost,
+      installationBaseCost: draft.installationBaseCost,
       processorCost: draft.processorCost,
       freightCost: draft.freightCost,
       technicalVisitCost: draft.technicalVisitCost,
@@ -438,6 +482,8 @@ function DashboardPage() {
       includeFreight: quote.includeFreight,
       includeTechnicalVisit: quote.includeTechnicalVisit,
       includeExtendedWarranty: quote.includeExtendedWarranty,
+      structureBaseCost: quote.structureBaseCost,
+      installationBaseCost: quote.installationBaseCost,
       processorCost: quote.processorCost,
       freightCost: quote.freightCost,
       technicalVisitCost: quote.technicalVisitCost,
@@ -562,6 +608,17 @@ function DuplicateClientAlert({ draft }: { draft: Draft }) {
 
 function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; onDone?: () => void }) {
   const products = useBorealStore((state) => state.products);
+  const editingServiceDefaults = editingQuote
+    ? getDefaultServiceBaseCosts(
+        {
+          width: editingQuote.width,
+          height: editingQuote.height,
+          productId: editingQuote.product.id,
+          category: editingQuote.product.category,
+        },
+        products,
+      )
+    : null;
   const initialFromQuote = editingQuote
     ? {
         ...initialDraft,
@@ -584,6 +641,8 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         includeFreight: editingQuote.includeFreight,
         includeTechnicalVisit: editingQuote.includeTechnicalVisit,
         includeExtendedWarranty: editingQuote.includeExtendedWarranty,
+        structureBaseCost: editingQuote.structureBaseCost ?? editingServiceDefaults?.structureBaseCost ?? initialDraft.structureBaseCost,
+        installationBaseCost: editingQuote.installationBaseCost ?? editingServiceDefaults?.installationBaseCost ?? initialDraft.installationBaseCost,
         processorCost: editingQuote.processorCost,
         freightCost: editingQuote.freightCost,
         technicalVisitCost: editingQuote.technicalVisitCost,
@@ -610,7 +669,11 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
   const validation = quoteSchema.safeParse({ name: draft.name, document: draft.document, width: draft.width, height: draft.height });
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
-    setDraft((current) => ({ ...current, [key]: value }));
+    if (key === "structureBaseCost" || key === "installationBaseCost") {
+      setDraft((current) => ({ ...current, [key]: value }));
+      return;
+    }
+    setDraft((current) => syncServiceBaseCosts(current, { ...current, [key]: value }, products));
   }
 
   async function generateQuote() {
@@ -657,6 +720,8 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         includeFreight: draft.includeFreight,
         includeTechnicalVisit: draft.includeTechnicalVisit,
         includeExtendedWarranty: draft.includeExtendedWarranty,
+        structureBaseCost: draft.includeStructure ? draft.structureBaseCost : 0,
+        installationBaseCost: draft.includeInstallation ? draft.installationBaseCost : 0,
         processorCost: draft.processorCost,
         freightCost: draft.freightCost,
         technicalVisitCost: draft.technicalVisitCost,
@@ -725,7 +790,7 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
           {(["indoor", "outdoor"] as Category[]).map((category) => (
             <button key={category} className={cx("neon-card p-8 text-left transition hover:border-cyan-300/50", draft.category === category && "border-cyan-300/70 bg-cyan-300/10")} onClick={() => {
               const nextProduct = products.find((product) => product.category === category)!;
-              setDraft((current) => ({ ...current, category, productId: nextProduct.id }));
+              setDraft((current) => syncServiceBaseCosts(current, { ...current, category, productId: nextProduct.id }, products));
             }}>
               <MonitorUp className="mb-4 h-8 w-8 text-cyan-200" />
               <h2 className="text-2xl font-black capitalize text-white">{category}</h2>
@@ -740,7 +805,7 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
           {availableProducts.map((product) => (
             <ProductCatalogCard key={product.id} product={product} onQuote={() => {
               const firstFormat = product.formats[0];
-              setDraft((current) => ({ ...current, productId: product.id, width: firstFormat?.width ?? current.width, height: firstFormat?.height ?? current.height }));
+              setDraft((current) => syncServiceBaseCosts(current, { ...current, productId: product.id, width: firstFormat?.width ?? current.width, height: firstFormat?.height ?? current.height }, products));
             }} selected={product.id === draft.productId} />
           ))}
         </div>
@@ -752,7 +817,7 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
             <h2 className="text-xl font-bold text-white">Medida da tela</h2>
             <div className="grid gap-3">
               {math.product.formats.map((format) => (
-                <button key={`${format.width}-${format.height}`} className="btn-secondary justify-between" onClick={() => setDraft((current) => ({ ...current, width: format.width, height: format.height }))}>
+                <button key={`${format.width}-${format.height}`} className="btn-secondary justify-between" onClick={() => setDraft((current) => syncServiceBaseCosts(current, { ...current, width: format.width, height: format.height }, products))}>
                   Formato padrão
                   <span>{format.width.toFixed(2)} x {format.height.toFixed(2)} m</span>
                 </button>
@@ -807,6 +872,8 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
             <Toggle label="Incluir visita técnica" checked={draft.includeTechnicalVisit} onChange={(value) => update("includeTechnicalVisit", value)} />
             <Toggle label="Incluir garantia estendida" checked={draft.includeExtendedWarranty} onChange={(value) => update("includeExtendedWarranty", value)} />
             <div className="grid gap-4 md:grid-cols-2">
+              <Input label="Estrutura" type="number" value={draft.structureBaseCost} disabled={!draft.includeStructure} onChange={(value) => update("structureBaseCost", Math.max(0, Number(value) || 0))} />
+              <Input label="Instalação" type="number" value={draft.installationBaseCost} disabled={!draft.includeInstallation} onChange={(value) => update("installationBaseCost", Math.max(0, Number(value) || 0))} />
               <Input label="Frete" type="number" value={draft.freightCost} onChange={(value) => update("freightCost", Number(value))} />
               <Input label="Processadora" type="number" value={draft.processorCost} onChange={(value) => update("processorCost", Number(value))} />
               <Input label="Visita técnica" type="number" value={draft.technicalVisitCost} onChange={(value) => update("technicalVisitCost", Number(value))} />
@@ -1092,6 +1159,8 @@ function QuotesPage({ onEdit }: { onEdit: (quote: Quote) => void }) {
                 includeFreight: quote.includeFreight,
                 includeTechnicalVisit: quote.includeTechnicalVisit,
                 includeExtendedWarranty: quote.includeExtendedWarranty,
+                structureBaseCost: quote.structureBaseCost,
+                installationBaseCost: quote.installationBaseCost,
                 processorCost: quote.processorCost,
                 freightCost: quote.freightCost,
                 technicalVisitCost: quote.technicalVisitCost,
@@ -1519,6 +1588,8 @@ async function exportQuotePdf(quote: Quote) {
     includeFreight: quote.includeFreight,
     includeTechnicalVisit: quote.includeTechnicalVisit,
     includeExtendedWarranty: quote.includeExtendedWarranty,
+    structureBaseCost: quote.structureBaseCost,
+    installationBaseCost: quote.installationBaseCost,
     processorCost: quote.processorCost,
     freightCost: quote.freightCost,
     technicalVisitCost: quote.technicalVisitCost,

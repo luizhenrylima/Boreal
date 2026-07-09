@@ -84,6 +84,8 @@ export type Quote = {
   includeFreight: boolean;
   includeTechnicalVisit: boolean;
   includeExtendedWarranty: boolean;
+  structureBaseCost?: number;
+  installationBaseCost?: number;
   processorCost: number;
   freightCost: number;
   technicalVisitCost: number;

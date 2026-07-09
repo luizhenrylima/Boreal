@@ -74,6 +74,8 @@ export function calculateQuoteTotal({
   includeFreight,
   includeTechnicalVisit,
   includeExtendedWarranty,
+  structureBaseCost: customStructureBaseCost,
+  installationBaseCost: customInstallationBaseCost,
   processorCost,
   freightCost,
   technicalVisitCost,
@@ -90,6 +92,8 @@ export function calculateQuoteTotal({
   includeFreight: boolean;
   includeTechnicalVisit: boolean;
   includeExtendedWarranty: boolean;
+  structureBaseCost?: number;
+  installationBaseCost?: number;
   processorCost: number;
   freightCost: number;
   technicalVisitCost: number;
@@ -98,12 +102,17 @@ export function calculateQuoteTotal({
   discountPercent: number;
 }) {
   const panelSubtotal = area * pricePerSqm;
-  const structureBaseCost = includeStructure
-    ? category === "indoor"
+  const defaultStructureBaseCost =
+    category === "indoor"
       ? area * servicePricing.indoorStructurePerSqm
-      : area * servicePricing.outdoorStructurePerSqm
+      : area * servicePricing.outdoorStructurePerSqm;
+  const defaultInstallationBaseCost = area * servicePricing.installationPerSqm;
+  const structureBaseCost = includeStructure
+    ? Number((customStructureBaseCost ?? defaultStructureBaseCost).toFixed(2))
     : 0;
-  const installationBaseCost = includeInstallation ? area * servicePricing.installationPerSqm : 0;
+  const installationBaseCost = includeInstallation
+    ? Number((customInstallationBaseCost ?? defaultInstallationBaseCost).toFixed(2))
+    : 0;
 
   const base = {
     panelSubtotal,

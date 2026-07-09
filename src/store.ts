@@ -69,6 +69,8 @@ type QuoteRow = {
   include_freight: boolean | null;
   include_technical_visit: boolean | null;
   include_extended_warranty: boolean | null;
+  structure_base_cost: number | null;
+  installation_base_cost: number | null;
   processor_cost: number | null;
   freight_cost: number | null;
   technical_visit_cost: number | null;
@@ -220,6 +222,8 @@ function mapQuote(row: QuoteRow): Quote {
     includeFreight: Boolean(row.include_freight),
     includeTechnicalVisit: Boolean(row.include_technical_visit),
     includeExtendedWarranty: Boolean(row.include_extended_warranty),
+    structureBaseCost: row.structure_base_cost === null ? undefined : Number(row.structure_base_cost),
+    installationBaseCost: row.installation_base_cost === null ? undefined : Number(row.installation_base_cost),
     processorCost: Number(row.processor_cost ?? 0),
     freightCost: Number(row.freight_cost ?? 0),
     technicalVisitCost: Number(row.technical_visit_cost ?? 0),
@@ -398,6 +402,8 @@ export const useBorealStore = create<AppState>((set, get) => ({
       includeFreight: quote.includeFreight,
       includeTechnicalVisit: quote.includeTechnicalVisit,
       includeExtendedWarranty: quote.includeExtendedWarranty,
+      structureBaseCost: quote.structureBaseCost,
+      installationBaseCost: quote.installationBaseCost,
       processorCost: quote.processorCost,
       freightCost: quote.freightCost,
       technicalVisitCost: quote.technicalVisitCost,
