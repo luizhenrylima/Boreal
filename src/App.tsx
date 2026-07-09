@@ -105,6 +105,19 @@ type Draft = {
   screens: Array<{ id: string; productId: string; width: number; height: number; label: string }>;
 };
 
+type ProductDraft = {
+  category: Category;
+  technology: string;
+  pixelPitch: string;
+  pixelPitchMm: number;
+  cabinetSize: string;
+  pricePerSqm: number;
+  application: string;
+  recommendedUse: string;
+  lifespanHours: number;
+  imageDataUrl?: string;
+};
+
 const initialDraft: Draft = {
   name: "",
   document: "",
@@ -133,6 +146,18 @@ const initialDraft: Draft = {
   discountPercent: 0,
   productImageDataUrl: "",
   screens: [],
+};
+
+const initialProductDraft: ProductDraft = {
+  category: "indoor",
+  technology: "",
+  pixelPitch: "",
+  pixelPitchMm: 1.5,
+  cabinetSize: "",
+  pricePerSqm: 0,
+  application: "",
+  recommendedUse: "",
+  lifespanHours: 100000,
 };
 
 const statusLabels: Record<QuoteStatus, string> = {
@@ -723,7 +748,7 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
 
       {step === 3 && (
         <div className="grid gap-4 lg:grid-cols-[.9fr_1.1fr]">
-          <div className="neon-card grid gap-4 p-5">
+          <div className="neon-card grid gap-4 p-5 lg:col-span-2">
             <h2 className="text-xl font-bold text-white">Medida da tela</h2>
             <div className="grid gap-3">
               {math.product.formats.map((format) => (
@@ -1258,12 +1283,71 @@ function SettingsPage() {
   const products = useBorealStore((state) => state.products);
   const upsertProduct = useBorealStore((state) => state.upsertProduct);
   const [selectedId, setSelectedId] = useState(products[0]?.id ?? "");
+  const [newProduct, setNewProduct] = useState<ProductDraft>(initialProductDraft);
   const selected = products.find((product) => product.id === selectedId) ?? products[0];
   const [message, setMessage] = useState("");
+  const [isCreatingProduct, setIsCreatingProduct] = useState(false);
 
   function updateSelected<K extends keyof Product>(key: K, value: Product[K]) {
     if (!selected) return;
     void upsertProduct({ ...selected, [key]: value }).then((result) => setMessage(result.message));
+  }
+
+  function updateNewProduct<K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) {
+    setNewProduct((current) => ({ ...current, [key]: value }));
+  }
+
+  async function handleCreateProduct() {
+    const technology = newProduct.technology.trim();
+    const pixelPitch = newProduct.pixelPitch.trim();
+    const application = newProduct.application.trim();
+    const recommendedUse = newProduct.recommendedUse.trim();
+    const cabinetSize = newProduct.cabinetSize.trim();
+
+    if (!technology || !pixelPitch || newProduct.pixelPitchMm <= 0 || newProduct.pricePerSqm <= 0) {
+      setMessage("Informe tecnologia, pixel pitch, pixel pitch mm e preco por m2.");
+      return;
+    }
+
+    const alreadyExists = products.some(
+      (product) =>
+        product.technology.trim().toLowerCase() === technology.toLowerCase() &&
+        product.pixelPitch.trim().toLowerCase() === pixelPitch.toLowerCase(),
+    );
+
+    if (alreadyExists) {
+      setMessage("Produto ja existe no catalogo. Selecione o item na lista para editar.");
+      return;
+    }
+
+    const product: Product = {
+      id: crypto.randomUUID(),
+      category: newProduct.category,
+      technology,
+      pixelPitch,
+      pixelPitchMm: newProduct.pixelPitchMm,
+      cabinetSize: cabinetSize || null,
+      pricePerSqm: newProduct.pricePerSqm,
+      supplier: "LED Wave",
+      processorSystem: "NovaStar",
+      lifespanHours: newProduct.lifespanHours || 100000,
+      application: application || (newProduct.category === "indoor" ? "Indoor Ultrawide / Cinema" : "Outdoor"),
+      recommendedUse: recommendedUse || "Aplicacao sob validacao tecnica Boreal.",
+      imageDataUrl: newProduct.imageDataUrl,
+      formats: [],
+      technicalHighlights: ["Processamento NovaStar", "Operacao continua", "Manutencao facilitada"],
+      commercialDifferentials: ["Garantia Boreal", "Projeto sob validacao tecnica"],
+    };
+
+    setIsCreatingProduct(true);
+    const result = await upsertProduct(product);
+    setMessage(result.message);
+    setIsCreatingProduct(false);
+
+    if (result.ok) {
+      setSelectedId(product.id);
+      setNewProduct(initialProductDraft);
+    }
   }
 
   return (
@@ -1283,6 +1367,51 @@ function SettingsPage() {
             ))}
           </div>
         </div>
+        <form className="neon-card grid gap-4 p-5" onSubmit={(event) => { event.preventDefault(); void handleCreateProduct(); }}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xl font-bold text-white">Novo produto</h2>
+            <span className="badge">{newProduct.category === "indoor" ? "Indoor" : "Outdoor"}</span>
+          </div>
+          <label className="space-y-2">
+            <span className="label">Categoria</span>
+            <select className="field" value={newProduct.category} onChange={(event) => updateNewProduct("category", event.target.value as Category)}>
+              <option value="indoor">Indoor</option>
+              <option value="outdoor">Outdoor</option>
+            </select>
+          </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Input label="Tecnologia" value={newProduct.technology} onChange={(value) => updateNewProduct("technology", value)} />
+            <Input label="Pixel pitch" value={newProduct.pixelPitch} onChange={(value) => updateNewProduct("pixelPitch", value)} />
+            <Input label="Pixel pitch mm" type="number" value={newProduct.pixelPitchMm} onChange={(value) => updateNewProduct("pixelPitchMm", Number(value))} />
+            <Input label="Preco por m2" type="number" value={newProduct.pricePerSqm} onChange={(value) => updateNewProduct("pricePerSqm", Number(value))} />
+            <Input label="Gabinete" value={newProduct.cabinetSize} onChange={(value) => updateNewProduct("cabinetSize", value)} />
+            <Input label="Vida util" type="number" value={newProduct.lifespanHours} onChange={(value) => updateNewProduct("lifespanHours", Number(value))} />
+          </div>
+          <Input label="Aplicacao" value={newProduct.application} onChange={(value) => updateNewProduct("application", value)} />
+          <TextArea label="Uso recomendado" value={newProduct.recommendedUse} onChange={(value) => updateNewProduct("recommendedUse", value)} />
+          <label className="space-y-2">
+            <span className="label">Imagem do produto</span>
+            <input
+              className="block w-full text-sm text-slate-300 file:mr-4 file:h-10 file:rounded-md file:border-0 file:bg-cyan-300 file:px-4 file:text-sm file:font-semibold file:text-slate-950"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                void readImageFile(file).then((imageDataUrl) => updateNewProduct("imageDataUrl", imageDataUrl));
+              }}
+            />
+          </label>
+          {newProduct.imageDataUrl && <img className="max-h-56 w-full rounded-md object-contain" src={newProduct.imageDataUrl} alt="Imagem do novo produto" />}
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="btn-primary" type="submit" disabled={isCreatingProduct}>
+              {isCreatingProduct ? "Salvando..." : "Adicionar produto"}
+            </button>
+            <button className="btn-secondary" type="button" onClick={() => setNewProduct(initialProductDraft)}>
+              Limpar
+            </button>
+          </div>
+        </form>
         {selected && (
           <div className="neon-card grid gap-4 p-5">
             <h2 className="text-xl font-bold text-white">Editar item</h2>

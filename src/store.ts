@@ -469,18 +469,28 @@ export const useBorealStore = create<AppState>((set, get) => ({
     return { ok: true, message: `Cotacao ${quote.quoteNumber} salva no Supabase e PDF gerado.` };
   },
   upsertProduct: async (product) => {
+    const profile = get().profile;
+
+    if (!supabase) {
+      return { ok: false, message: "Produto nao foi salvo: Supabase nao esta configurado neste ambiente." };
+    }
+
+    if (profile?.role !== "master_admin") {
+      return { ok: false, message: "Produto nao foi salvo: acesso exclusivo do Admin Master." };
+    }
+
+    const { error } = await supabase.from("products").upsert(productPayload(product), { onConflict: "technology,pixel_pitch" });
+    if (error) {
+      return { ok: false, message: `Produto nao foi salvo: Supabase recusou: ${error.message}` };
+    }
+
     set((state) => ({
       products: state.products.some((item) => item.id === product.id)
         ? state.products.map((item) => (item.id === product.id ? product : item))
-        : [product, ...state.products],
+        : [product, ...state.products].sort((a, b) => `${a.technology} ${a.pixelPitch}`.localeCompare(`${b.technology} ${b.pixelPitch}`)),
     }));
 
-    if (!supabase) return { ok: true, message: "Produto salvo localmente." };
-
-    const { error } = await supabase.from("products").upsert(productPayload(product), { onConflict: "technology,pixel_pitch" });
-    return error
-      ? { ok: false, message: `Produto salvo localmente. Supabase recusou: ${error.message}` }
-      : { ok: true, message: "Produto salvo no Supabase." };
+    return { ok: true, message: "Produto salvo no Supabase." };
   },
   createPartner: async (partner, adminUserId, adminName) => {
     set((state) => ({
