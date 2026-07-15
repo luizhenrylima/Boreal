@@ -182,7 +182,12 @@ function mapProduct(row: ProductRow | null, quoteRow?: Pick<QuoteRow, "price_per
 }
 
 function mapQuote(row: QuoteRow): Quote {
-  let quoteMeta: { productImageDataUrl?: string; screens?: Quote["screens"] } = {};
+  let quoteMeta: {
+    productImageDataUrl?: string;
+    screens?: Quote["screens"];
+    processorName?: string;
+    hideProcessorInQuote?: boolean;
+  } = {};
   if (row.notes) {
     try {
       quoteMeta = JSON.parse(row.notes) as typeof quoteMeta;
@@ -234,6 +239,8 @@ function mapQuote(row: QuoteRow): Quote {
     createdAt: row.created_at ?? new Date().toISOString(),
     productImageDataUrl: quoteMeta.productImageDataUrl,
     screens: quoteMeta.screens,
+    processorName: quoteMeta.processorName,
+    hideProcessorInQuote: Boolean(quoteMeta.hideProcessorInQuote),
   };
 }
 
@@ -392,6 +399,7 @@ export const useBorealStore = create<AppState>((set, get) => ({
     const area = calculateArea(quote.width, quote.height);
     const pixelLoad = calculatePixelLoad(quote.width, quote.height, quote.product.pixelPitchMm);
     const processor = suggestProcessor(pixelLoad.requiredPorts);
+    const processorName = quote.processorName?.trim() || processor.name;
     const totals = calculateQuoteTotal({
       area,
       pricePerSqm: quote.product.pricePerSqm,
@@ -430,7 +438,7 @@ export const useBorealStore = create<AppState>((set, get) => ({
       pixels_height: pixelLoad.pixelsHeight,
       total_pixels: pixelLoad.totalPixels,
       required_processor_ports: pixelLoad.requiredPorts,
-      suggested_processor_name: processor.name,
+      suggested_processor_name: processorName,
       suggested_processor_ports: processor.ports,
       price_per_sqm: quote.product.pricePerSqm,
       panel_subtotal: totals.base.panelSubtotal,
@@ -455,6 +463,8 @@ export const useBorealStore = create<AppState>((set, get) => ({
       notes: JSON.stringify({
         productImageDataUrl: quote.productImageDataUrl,
         screens: quote.screens,
+        processorName,
+        hideProcessorInQuote: quote.hideProcessorInQuote,
       }),
     }).select("id").single();
 

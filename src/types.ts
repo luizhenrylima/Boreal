@@ -86,6 +86,8 @@ export type Quote = {
   includeExtendedWarranty: boolean;
   structureBaseCost?: number;
   installationBaseCost?: number;
+  processorName?: string;
+  hideProcessorInQuote?: boolean;
   processorCost: number;
   freightCost: number;
   technicalVisitCost: number;
