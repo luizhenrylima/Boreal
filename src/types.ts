@@ -63,6 +63,16 @@ export type Client = {
   createdBy: string;
 };
 
+export type PaymentOption = {
+  id: string;
+  label: string;
+  cashAmount: number;
+  downPayment: number;
+  installmentCount: number;
+  installmentAmount: number;
+  notes: string;
+};
+
 export type Quote = {
   id: string;
   quoteNumber: string;
@@ -77,6 +87,12 @@ export type Quote = {
     width: number;
     height: number;
     label: string;
+    structureCost?: number;
+    installationCost?: number;
+    processorCost?: number;
+    freightCost?: number;
+    technicalVisitCost?: number;
+    extendedWarrantyCost?: number;
   }>;
   includeStructure: boolean;
   includeInstallation: boolean;
@@ -95,4 +111,5 @@ export type Quote = {
   status: QuoteStatus;
   createdAt: string;
   productImageDataUrl?: string;
+  paymentOptions?: PaymentOption[];
 };

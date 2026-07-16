@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { products as defaultProducts } from "./data";
-import { calculateArea, calculatePixelLoad, calculateQuoteTotal, detectFormat, suggestProcessor } from "./calculations";
+import { calculateArea, calculatePixelLoad, calculateProjectTotal, detectFormat, suggestProcessor } from "./calculations";
 import { supabase } from "./supabaseClient";
 import type { Client, Partner, Product, Quote, Role } from "./types";
 
@@ -182,7 +182,7 @@ function mapProduct(row: ProductRow | null, quoteRow?: Pick<QuoteRow, "price_per
 }
 
 function mapQuote(row: QuoteRow): Quote {
-  let quoteMeta: { productImageDataUrl?: string; screens?: Quote["screens"] } = {};
+  let quoteMeta: { productImageDataUrl?: string; screens?: Quote["screens"]; paymentOptions?: Quote["paymentOptions"] } = {};
   if (row.notes) {
     try {
       quoteMeta = JSON.parse(row.notes) as typeof quoteMeta;
@@ -234,6 +234,7 @@ function mapQuote(row: QuoteRow): Quote {
     createdAt: row.created_at ?? new Date().toISOString(),
     productImageDataUrl: quoteMeta.productImageDataUrl,
     screens: quoteMeta.screens,
+    paymentOptions: quoteMeta.paymentOptions,
   };
 }
 
@@ -392,25 +393,23 @@ export const useBorealStore = create<AppState>((set, get) => ({
     const area = calculateArea(quote.width, quote.height);
     const pixelLoad = calculatePixelLoad(quote.width, quote.height, quote.product.pixelPitchMm);
     const processor = suggestProcessor(pixelLoad.requiredPorts);
-    const totals = calculateQuoteTotal({
-      area,
-      pricePerSqm: quote.product.pricePerSqm,
-      category: quote.product.category,
-      includeStructure: quote.includeStructure,
-      includeInstallation: quote.includeInstallation,
-      includeProcessor: quote.includeProcessor,
-      includeFreight: quote.includeFreight,
-      includeTechnicalVisit: quote.includeTechnicalVisit,
-      includeExtendedWarranty: quote.includeExtendedWarranty,
-      structureBaseCost: quote.structureBaseCost,
-      installationBaseCost: quote.installationBaseCost,
-      processorCost: quote.processorCost,
-      freightCost: quote.freightCost,
-      technicalVisitCost: quote.technicalVisitCost,
-      extendedWarrantyCost: quote.extendedWarrantyCost,
-      marginPercent: quote.marginPercent,
-      discountPercent: quote.discountPercent,
-    });
+    const totals = calculateProjectTotal([{
+      area, pricePerSqm: quote.product.pricePerSqm, category: quote.product.category,
+      includeStructure: quote.includeStructure, includeInstallation: quote.includeInstallation,
+      includeProcessor: quote.includeProcessor, includeFreight: quote.includeFreight,
+      includeTechnicalVisit: quote.includeTechnicalVisit, includeExtendedWarranty: quote.includeExtendedWarranty,
+      structureBaseCost: quote.structureBaseCost, installationBaseCost: quote.installationBaseCost,
+      processorCost: quote.processorCost, freightCost: quote.freightCost,
+      technicalVisitCost: quote.technicalVisitCost, extendedWarrantyCost: quote.extendedWarrantyCost,
+    }, ...(quote.screens ?? []).map((screen) => ({
+      area: calculateArea(screen.width, screen.height), pricePerSqm: screen.product.pricePerSqm, category: screen.product.category,
+      includeStructure: (screen.structureCost ?? 0) > 0, includeInstallation: (screen.installationCost ?? 0) > 0,
+      includeProcessor: (screen.processorCost ?? 0) > 0, includeFreight: (screen.freightCost ?? 0) > 0,
+      includeTechnicalVisit: (screen.technicalVisitCost ?? 0) > 0, includeExtendedWarranty: (screen.extendedWarrantyCost ?? 0) > 0,
+      structureBaseCost: screen.structureCost, installationBaseCost: screen.installationCost,
+      processorCost: screen.processorCost ?? 0, freightCost: screen.freightCost ?? 0,
+      technicalVisitCost: screen.technicalVisitCost ?? 0, extendedWarrantyCost: screen.extendedWarrantyCost ?? 0,
+    }))], quote.marginPercent, quote.discountPercent);
 
     const { data: savedQuote, error: quoteError } = await supabase.from("quotes").upsert({
       id: quote.id,
@@ -455,6 +454,7 @@ export const useBorealStore = create<AppState>((set, get) => ({
       notes: JSON.stringify({
         productImageDataUrl: quote.productImageDataUrl,
         screens: quote.screens,
+        paymentOptions: quote.paymentOptions,
       }),
     }).select("id").single();
 

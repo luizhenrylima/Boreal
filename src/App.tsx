@@ -40,6 +40,7 @@ import {
   calculateArea,
   calculatePanelValue,
   calculatePixelLoad,
+  calculateProjectTotal,
   calculateQuoteTotal,
   detectFormat,
   formatBRL,
@@ -49,7 +50,7 @@ import {
 } from "./calculations";
 import { useBorealStore } from "./store";
 import type { Profile } from "./store";
-import type { Category, Client, Partner, Product, Quote, QuoteStatus, Role } from "./types";
+import type { Category, Client, Partner, PaymentOption, Product, Quote, QuoteStatus, Role } from "./types";
 
 const quoteSchema = z.object({
   name: z.string().min(3),
@@ -104,7 +105,8 @@ type Draft = {
   marginPercent: number;
   discountPercent: number;
   productImageDataUrl: string;
-  screens: Array<{ id: string; productId: string; width: number; height: number; label: string }>;
+  screens: Array<{ id: string; productId: string; width: number; height: number; label: string; structureCost: number; installationCost: number; processorCost: number; freightCost: number; technicalVisitCost: number; extendedWarrantyCost: number }>;
+  paymentOptions: PaymentOption[];
 };
 
 type ProductDraft = {
@@ -150,6 +152,7 @@ const initialDraft: Draft = {
   discountPercent: 0,
   productImageDataUrl: "",
   screens: [],
+  paymentOptions: [],
 };
 
 const initialProductDraft: ProductDraft = {
@@ -351,26 +354,30 @@ function useQuoteMath(draft: Draft) {
     const formatType = detectFormat(draft.width, draft.height);
     const pixelLoad = calculatePixelLoad(draft.width, draft.height, product.pixelPitchMm);
     const processor = suggestProcessor(pixelLoad.requiredPorts);
-    const totals = calculateQuoteTotal({
-      area,
-      pricePerSqm: product.pricePerSqm,
-      category: product.category,
-      includeStructure: draft.includeStructure,
-      includeInstallation: draft.includeInstallation,
-      includeProcessor: draft.includeProcessor,
-      includeFreight: draft.includeFreight,
-      includeTechnicalVisit: draft.includeTechnicalVisit,
-      includeExtendedWarranty: draft.includeExtendedWarranty,
-      structureBaseCost: draft.structureBaseCost,
-      installationBaseCost: draft.installationBaseCost,
-      processorCost: draft.processorCost,
-      freightCost: draft.freightCost,
-      technicalVisitCost: draft.technicalVisitCost,
-      extendedWarrantyCost: draft.extendedWarrantyCost,
-      marginPercent: draft.marginPercent,
-      discountPercent: draft.discountPercent,
-    });
-    return { product, area, panelValue, formatType, pixelLoad, processor, totals };
+    const projectTotals = calculateProjectTotal([
+      {
+        area, pricePerSqm: product.pricePerSqm, category: product.category,
+        includeStructure: draft.includeStructure, includeInstallation: draft.includeInstallation,
+        includeProcessor: draft.includeProcessor, includeFreight: draft.includeFreight,
+        includeTechnicalVisit: draft.includeTechnicalVisit, includeExtendedWarranty: draft.includeExtendedWarranty,
+        structureBaseCost: draft.structureBaseCost, installationBaseCost: draft.installationBaseCost,
+        processorCost: draft.processorCost, freightCost: draft.freightCost,
+        technicalVisitCost: draft.technicalVisitCost, extendedWarrantyCost: draft.extendedWarrantyCost,
+      },
+      ...draft.screens.map((screen) => {
+        const screenProduct = products.find((item) => item.id === screen.productId) ?? product;
+        return {
+          area: calculateArea(screen.width, screen.height), pricePerSqm: screenProduct.pricePerSqm, category: screenProduct.category,
+          includeStructure: screen.structureCost > 0, includeInstallation: screen.installationCost > 0,
+          includeProcessor: screen.processorCost > 0, includeFreight: screen.freightCost > 0,
+          includeTechnicalVisit: screen.technicalVisitCost > 0, includeExtendedWarranty: screen.extendedWarrantyCost > 0,
+          structureBaseCost: screen.structureCost, installationBaseCost: screen.installationCost,
+          processorCost: screen.processorCost, freightCost: screen.freightCost,
+          technicalVisitCost: screen.technicalVisitCost, extendedWarrantyCost: screen.extendedWarrantyCost,
+        };
+      }),
+    ], draft.marginPercent, draft.discountPercent);
+    return { product, area, panelValue, formatType, pixelLoad, processor, totals: projectTotals };
   }, [draft, products]);
 }
 
@@ -650,7 +657,8 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         marginPercent: editingQuote.marginPercent,
         discountPercent: editingQuote.discountPercent,
         productImageDataUrl: editingQuote.productImageDataUrl ?? "",
-        screens: editingQuote.screens?.map((screen) => ({ id: screen.id, productId: screen.product.id, width: screen.width, height: screen.height, label: screen.label })) ?? [],
+        screens: editingQuote.screens?.map((screen) => ({ id: screen.id, productId: screen.product.id, width: screen.width, height: screen.height, label: screen.label, structureCost: screen.structureCost ?? 0, installationCost: screen.installationCost ?? 0, processorCost: screen.processorCost ?? 0, freightCost: screen.freightCost ?? 0, technicalVisitCost: screen.technicalVisitCost ?? 0, extendedWarrantyCost: screen.extendedWarrantyCost ?? 0 })) ?? [],
+        paymentOptions: editingQuote.paymentOptions ?? [],
       }
     : initialDraft;
   const [step, setStep] = useState(0);
@@ -674,6 +682,20 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
       return;
     }
     setDraft((current) => syncServiceBaseCosts(current, { ...current, [key]: value }, products));
+  }
+
+  function addAdditionalScreen() {
+    const product = products.find((item) => item.id === draft.productId) ?? products[0];
+    const defaults = getDefaultServiceBaseCosts(draft, products);
+    const pixelLoad = calculatePixelLoad(draft.width, draft.height, product.pixelPitchMm);
+    update("screens", [...draft.screens, {
+      id: crypto.randomUUID(), productId: product.id, width: draft.width, height: draft.height,
+      label: `Tela ${draft.screens.length + 2}`,
+      structureCost: defaults.structureBaseCost,
+      installationCost: defaults.installationBaseCost,
+      processorCost: suggestProcessor(pixelLoad.requiredPorts).price,
+      freightCost: 0, technicalVisitCost: 0, extendedWarrantyCost: 0,
+    }]);
   }
 
   async function generateQuote() {
@@ -713,6 +735,12 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
           width: screen.width,
           height: screen.height,
           label: screen.label,
+          structureCost: screen.structureCost,
+          installationCost: screen.installationCost,
+          processorCost: screen.processorCost,
+          freightCost: screen.freightCost,
+          technicalVisitCost: screen.technicalVisitCost,
+          extendedWarrantyCost: screen.extendedWarrantyCost,
         })),
         includeStructure: draft.includeStructure,
         includeInstallation: draft.includeInstallation,
@@ -731,6 +759,7 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         status: math.processor.note ? "technical_validation" : "sent",
         createdAt: new Date().toISOString(),
         productImageDataUrl: draft.productImageDataUrl,
+        paymentOptions: draft.paymentOptions,
       };
       const result = await saveQuote(client, quote);
       setMessage(result.message);
@@ -754,8 +783,8 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
     <div className="space-y-6">
       <PageHeader title="Nova Cotação" subtitle="Fluxo guiado para gerar propostas de painéis Boreal em menos de 2 minutos." />
       <div className="neon-card p-3">
-        <div className="grid gap-2 md:grid-cols-7">
-          {["Cliente", "Tipo", "Tecnologia", "Medida", "Processamento", "Serviços", "Revisão"].map((label, index) => (
+        <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
+          {["Cliente", "Tipo", "Tecnologia", "Medida", "Processamento", "Serviços", "Pagamento", "Revisão"].map((label, index) => (
             <button key={label} className={cx("rounded-md px-3 py-2 text-sm", step === index ? "bg-cyan-300 text-slate-950" : "bg-white/5 text-slate-300")} onClick={() => setStep(index)}>
               {index + 1}. {label}
             </button>
@@ -832,7 +861,7 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
                 <h3 className="font-bold text-white">Telas adicionais</h3>
                 <button
                   className="btn-secondary h-9"
-                  onClick={() => update("screens", [...draft.screens, { id: crypto.randomUUID(), productId: draft.productId, width: draft.width, height: draft.height, label: `Tela ${draft.screens.length + 2}` }])}
+                  onClick={addAdditionalScreen}
                 >
                   Adicionar tela
                 </button>
@@ -865,6 +894,11 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         <div className="grid gap-4 lg:grid-cols-[1fr_.9fr]">
           <div className="neon-card grid gap-3 p-5">
             <h2 className="text-xl font-bold text-white">Custos adicionais</h2>
+            <div className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3">
+              <span className="text-xs font-bold uppercase tracking-widest text-cyan-200">Tela 1</span>
+              <h3 className="mt-1 text-lg font-black text-white">Tela principal</h3>
+              <p className="text-sm text-slate-300">{draft.width.toFixed(2)} × {draft.height.toFixed(2)} m · custos exclusivos desta tela</p>
+            </div>
             <Toggle label="Incluir estrutura" checked={draft.includeStructure} onChange={(value) => update("includeStructure", value)} />
             <Toggle label="Incluir instalação" checked={draft.includeInstallation} onChange={(value) => update("includeInstallation", value)} />
             <Toggle label="Incluir processadora" checked={draft.includeProcessor} onChange={(value) => update("includeProcessor", value)} />
@@ -878,15 +912,40 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
               <Input label="Processadora" type="number" value={draft.processorCost} onChange={(value) => update("processorCost", Number(value))} />
               <Input label="Visita técnica" type="number" value={draft.technicalVisitCost} onChange={(value) => update("technicalVisitCost", Number(value))} />
               <Input label="Garantia estendida" type="number" value={draft.extendedWarrantyCost} onChange={(value) => update("extendedWarrantyCost", Number(value))} />
-              <Input label="Margem interna (%)" type="number" value={draft.marginPercent} onChange={(value) => update("marginPercent", Number(value))} />
-              <Input label="Desconto (%)" type="number" value={draft.discountPercent} onChange={(value) => update("discountPercent", Number(value))} />
+            </div>
+            {draft.screens.map((screen, index) => (
+              <div className="mt-4 rounded-xl border border-violet-300/30 bg-violet-300/5 p-5" key={screen.id}>
+                <div className="mb-4">
+                  <span className="text-xs font-bold uppercase tracking-widest text-violet-200">Tela {index + 2}</span>
+                  <h3 className="mt-1 text-lg font-black text-white">{screen.label}</h3>
+                  <p className="text-sm text-slate-300">{screen.width.toFixed(2)} × {screen.height.toFixed(2)} m · personalize cada valor desta tela</p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Input label="Estrutura" type="number" value={screen.structureCost} onChange={(value) => update("screens", draft.screens.map((item) => item.id === screen.id ? { ...item, structureCost: Math.max(0, Number(value) || 0) } : item))} />
+                  <Input label="Instalação" type="number" value={screen.installationCost} onChange={(value) => update("screens", draft.screens.map((item) => item.id === screen.id ? { ...item, installationCost: Math.max(0, Number(value) || 0) } : item))} />
+                  <Input label="Processadora" type="number" value={screen.processorCost} onChange={(value) => update("screens", draft.screens.map((item) => item.id === screen.id ? { ...item, processorCost: Math.max(0, Number(value) || 0) } : item))} />
+                  <Input label="Frete" type="number" value={screen.freightCost} onChange={(value) => update("screens", draft.screens.map((item) => item.id === screen.id ? { ...item, freightCost: Math.max(0, Number(value) || 0) } : item))} />
+                  <Input label="Visita técnica" type="number" value={screen.technicalVisitCost} onChange={(value) => update("screens", draft.screens.map((item) => item.id === screen.id ? { ...item, technicalVisitCost: Math.max(0, Number(value) || 0) } : item))} />
+                  <Input label="Garantia estendida" type="number" value={screen.extendedWarrantyCost} onChange={(value) => update("screens", draft.screens.map((item) => item.id === screen.id ? { ...item, extendedWarrantyCost: Math.max(0, Number(value) || 0) } : item))} />
+                </div>
+              </div>
+            ))}
+            <div className="mt-4 rounded-xl border border-amber-300/30 bg-amber-300/10 p-5">
+              <h3 className="font-black text-white">Ajustes sobre o orçamento completo</h3>
+              <p className="mt-1 text-sm text-amber-100/80">A margem e o desconto abaixo são aplicados somente depois de somar todas as telas.</p>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Input label="Margem interna geral (%)" type="number" value={draft.marginPercent} onChange={(value) => update("marginPercent", Number(value))} />
+                <Input label="Desconto no total (%)" type="number" value={draft.discountPercent} onChange={(value) => update("discountPercent", Number(value))} />
+              </div>
             </div>
           </div>
           <PriceCalculator draft={draft} showInternal />
         </div>
       )}
 
-      {step === 6 && (
+      {step === 6 && <PaymentOptionsEditor options={draft.paymentOptions} onChange={(options) => update("paymentOptions", options)} quoteTotal={math.totals.total} />}
+
+      {step === 7 && (
         <div className="grid gap-4 xl:grid-cols-[1fr_.8fr]">
           <QuoteSummary draft={draft} />
           <div className="space-y-4">
@@ -917,7 +976,87 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
 
       <div className="flex justify-between">
         <button className="btn-secondary" disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))}>Voltar</button>
-        <button className="btn-primary" disabled={step === 6 || (step === 0 && sameDocument)} onClick={() => setStep((value) => Math.min(6, value + 1))}>Avançar</button>
+        <button className="btn-primary" disabled={step === 7 || (step === 0 && sameDocument)} onClick={() => setStep((value) => Math.min(7, value + 1))}>Avançar</button>
+      </div>
+    </div>
+  );
+}
+
+function PaymentOptionsEditor({ options, onChange, quoteTotal }: { options: PaymentOption[]; onChange: (options: PaymentOption[]) => void; quoteTotal: number }) {
+  function change(id: string, values: Partial<PaymentOption>) {
+    onChange(options.map((option) => option.id === id ? { ...option, ...values } : option));
+  }
+
+  function addOption() {
+    onChange([...options, {
+      id: crypto.randomUUID(),
+      label: options.length === 0 ? "Pagamento à vista" : `Opção ${options.length + 1}`,
+      cashAmount: options.length === 0 ? quoteTotal : 0,
+      downPayment: 0,
+      installmentCount: 0,
+      installmentAmount: 0,
+      notes: "",
+    }]);
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="overflow-hidden rounded-xl border border-cyan-300/40 bg-gradient-to-r from-cyan-300/20 via-blue-500/10 to-violet-500/20 p-6 shadow-[0_0_45px_rgba(34,211,238,.12)]">
+        <div className="flex flex-wrap items-center justify-between gap-5">
+          <div>
+            <span className="badge">Negociação comercial</span>
+            <h2 className="mt-4 text-3xl font-black text-white">Condições de pagamento</h2>
+            <p className="mt-2 max-w-2xl text-slate-300">Apresente alternativas claras para o cliente comparar. Os valores são livres e não alteram o preço-base da cotação.</p>
+          </div>
+          <button className="btn-primary min-h-12 px-6 text-base" type="button" onClick={addOption}>
+            <Plus className="h-5 w-5" /> Nova condição
+          </button>
+        </div>
+      </div>
+
+      {options.length === 0 && (
+        <button className="neon-card flex min-h-52 w-full flex-col items-center justify-center border-dashed p-8 text-center transition hover:border-cyan-300/60 hover:bg-cyan-300/5" type="button" onClick={addOption}>
+          <CircleDollarSign className="h-12 w-12 text-cyan-200" />
+          <strong className="mt-4 text-xl text-white">Adicione a primeira condição</strong>
+          <span className="mt-2 text-slate-400">Exemplo: à vista ou entrada + parcelas</span>
+        </button>
+      )}
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        {options.map((option, index) => {
+          const total = option.cashAmount || option.downPayment + option.installmentCount * option.installmentAmount;
+          return (
+            <div className="overflow-hidden rounded-xl border border-cyan-300/30 bg-slate-950/70 shadow-[0_0_30px_rgba(34,211,238,.08)]" key={option.id}>
+              <div className="flex items-center justify-between border-b border-cyan-300/20 bg-cyan-300/10 px-5 py-4">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-[.18em] text-cyan-200">Opção {index + 1}</span>
+                  <h3 className="mt-1 text-xl font-black text-white">{option.label || `Opção ${index + 1}`}</h3>
+                </div>
+                <button className="text-sm text-slate-400 transition hover:text-red-300" type="button" onClick={() => onChange(options.filter((item) => item.id !== option.id))}>Remover</button>
+              </div>
+              <div className="grid gap-4 p-5">
+                <Input label="Nome da condição" value={option.label} onChange={(value) => change(option.id, { label: value })} />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Input label="Valor à vista (R$)" type="number" value={option.cashAmount} onChange={(value) => change(option.id, { cashAmount: Math.max(0, Number(value) || 0) })} />
+                  <Input label="Entrada (R$)" type="number" value={option.downPayment} onChange={(value) => change(option.id, { downPayment: Math.max(0, Number(value) || 0) })} />
+                  <Input label="Número de parcelas" type="number" value={option.installmentCount} onChange={(value) => change(option.id, { installmentCount: Math.max(0, Math.floor(Number(value) || 0)) })} />
+                  <Input label="Valor da parcela (R$)" type="number" value={option.installmentAmount} onChange={(value) => change(option.id, { installmentAmount: Math.max(0, Number(value) || 0) })} />
+                </div>
+                <Input label="Observação da negociação" value={option.notes} onChange={(value) => change(option.id, { notes: value })} />
+                <div className="grid grid-cols-2 gap-3 rounded-lg bg-white/5 p-4">
+                  <div>
+                    <span className="text-xs uppercase tracking-wider text-slate-400">Formato</span>
+                    <strong className="mt-1 block text-sm text-white">{option.cashAmount > 0 ? "À vista" : option.installmentCount > 0 ? `${option.installmentCount}x` : "A definir"}</strong>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs uppercase tracking-wider text-slate-400">Total negociado</span>
+                    <strong className="mt-1 block text-xl text-cyan-200">{formatBRL(total)}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -989,6 +1128,7 @@ function Alert({ text }: { text: string }) {
 
 function PriceCalculator({ draft, showInternal = false }: { draft: Draft; showInternal?: boolean }) {
   const math = useQuoteMath(draft);
+  const screenLabels = ["Tela principal", ...draft.screens.map((screen) => screen.label)];
   return (
     <div className="neon-card p-5">
       <h3 className="font-bold text-white">Resumo financeiro</h3>
@@ -1001,6 +1141,29 @@ function PriceCalculator({ draft, showInternal = false }: { draft: Draft; showIn
         <Info label="Serviços técnicos" value={formatBRL(math.totals.withMargin.technicalVisit + math.totals.withMargin.extendedWarranty)} />
         <Info label="Desconto" value={formatBRL(math.totals.discountValue)} />
       </dl>
+      {math.totals.items.length > 1 && (
+        <div className="mt-5 space-y-3 border-t border-white/10 pt-5">
+          <h4 className="font-bold text-white">Valor por tela</h4>
+          {math.totals.items.map((item, index) => {
+            const services = item.withMargin.structure + item.withMargin.installation + item.withMargin.processor + item.withMargin.freight + item.withMargin.technicalVisit + item.withMargin.extendedWarranty;
+            return (
+              <div className="rounded-lg border border-white/10 bg-white/5 p-4" key={`${screenLabels[index]}-${index}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <strong className="text-white">{screenLabels[index]}</strong>
+                  <strong className="text-cyan-200">{formatBRL(item.subtotal)}</strong>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-400">
+                  <span>Painel: {formatBRL(item.withMargin.panel)}</span>
+                  <span className="text-right">Serviços: {formatBRL(services)}</span>
+                  <span>Estrutura: {formatBRL(item.withMargin.structure)}</span>
+                  <span className="text-right">Instalação: {formatBRL(item.withMargin.installation)}</span>
+                </div>
+              </div>
+            );
+          })}
+          <p className="text-xs text-slate-400">O desconto é calculado uma única vez sobre a soma de todas as telas.</p>
+        </div>
+      )}
       <div className="mt-5 rounded-lg bg-cyan-300 p-4 text-slate-950">
         <span className="text-sm font-semibold">Total final</span>
         <strong className="block text-3xl">{formatBRL(math.totals.total)}</strong>
@@ -1025,6 +1188,7 @@ function QuoteSummary({ draft }: { draft: Draft }) {
     ["Carga de pixels", math.pixelLoad.totalPixels.toLocaleString("pt-BR"), `${math.pixelLoad.requiredPorts} portas necessárias`],
     ["Processadora", math.processor.name, `${math.processor.ports} portas disponíveis · ${math.processor.note ? "Validação técnica" : "Compatível"}`],
     ["Serviços", "Estrutura, instalação e adicionais", "Valores finais com margem interna aplicada"],
+    ["Pagamento", draft.paymentOptions.length ? `${draft.paymentOptions.length} opção(ões) personalizada(s)` : "Condição a negociar", draft.paymentOptions.map((option) => option.label).join(" · ") || "Defina as condições antes de gerar a proposta"],
     ["Garantia e confiabilidade", "Até 100.000 horas", "Operação contínua · manutenção facilitada"],
   ];
   return (
@@ -1578,25 +1742,23 @@ async function exportQuotePdf(quote: Quote) {
   const area = calculateArea(quote.width, quote.height);
   const pixelLoad = calculatePixelLoad(quote.width, quote.height, quote.product.pixelPitchMm);
   const processor = suggestProcessor(pixelLoad.requiredPorts);
-  const totals = calculateQuoteTotal({
-    area,
-    pricePerSqm: quote.product.pricePerSqm,
-    category: quote.product.category,
-    includeStructure: quote.includeStructure,
-    includeInstallation: quote.includeInstallation,
-    includeProcessor: quote.includeProcessor,
-    includeFreight: quote.includeFreight,
-    includeTechnicalVisit: quote.includeTechnicalVisit,
-    includeExtendedWarranty: quote.includeExtendedWarranty,
-    structureBaseCost: quote.structureBaseCost,
-    installationBaseCost: quote.installationBaseCost,
-    processorCost: quote.processorCost,
-    freightCost: quote.freightCost,
-    technicalVisitCost: quote.technicalVisitCost,
-    extendedWarrantyCost: quote.extendedWarrantyCost,
-    marginPercent: quote.marginPercent,
-    discountPercent: quote.discountPercent,
-  });
+  const totals = calculateProjectTotal([{
+    area, pricePerSqm: quote.product.pricePerSqm, category: quote.product.category,
+    includeStructure: quote.includeStructure, includeInstallation: quote.includeInstallation,
+    includeProcessor: quote.includeProcessor, includeFreight: quote.includeFreight,
+    includeTechnicalVisit: quote.includeTechnicalVisit, includeExtendedWarranty: quote.includeExtendedWarranty,
+    structureBaseCost: quote.structureBaseCost, installationBaseCost: quote.installationBaseCost,
+    processorCost: quote.processorCost, freightCost: quote.freightCost,
+    technicalVisitCost: quote.technicalVisitCost, extendedWarrantyCost: quote.extendedWarrantyCost,
+  }, ...(quote.screens ?? []).map((screen) => ({
+    area: calculateArea(screen.width, screen.height), pricePerSqm: screen.product.pricePerSqm, category: screen.product.category,
+    includeStructure: (screen.structureCost ?? 0) > 0, includeInstallation: (screen.installationCost ?? 0) > 0,
+    includeProcessor: (screen.processorCost ?? 0) > 0, includeFreight: (screen.freightCost ?? 0) > 0,
+    includeTechnicalVisit: (screen.technicalVisitCost ?? 0) > 0, includeExtendedWarranty: (screen.extendedWarrantyCost ?? 0) > 0,
+    structureBaseCost: screen.structureCost, installationBaseCost: screen.installationCost,
+    processorCost: screen.processorCost ?? 0, freightCost: screen.freightCost ?? 0,
+    technicalVisitCost: screen.technicalVisitCost ?? 0, extendedWarrantyCost: screen.extendedWarrantyCost ?? 0,
+  }))], quote.marginPercent, quote.discountPercent);
   const doc = new jsPDF({ compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -1605,8 +1767,8 @@ async function exportQuotePdf(quote: Quote) {
     { product: quote.product, width: quote.width, height: quote.height, label: "Tela principal" },
     ...(quote.screens ?? []),
   ];
-  const screenPanelTotal = screenEntries.reduce((sum, screen) => sum + calculateArea(screen.width, screen.height) * screen.product.pricePerSqm, 0);
-  const grandTotal = totals.total - totals.withMargin.panel + screenPanelTotal * (1 + quote.marginPercent / 100);
+  const screenPanelTotal = totals.withMargin.panel;
+  const grandTotal = totals.total;
 
   function addImageCover(dataUrl: string, size: { width: number; height: number }) {
     const imageRatio = size.width / size.height;
@@ -1808,6 +1970,43 @@ async function exportQuotePdf(quote: Quote) {
     });
   }
 
+  if (screenEntries.length > 1) {
+    doc.addPage();
+    header("Valores por tela", "Painel, estrutura, instalação e adicionais discriminados");
+    let screenY = 58;
+    screenEntries.forEach((screen, index) => {
+      const item = totals.items[index];
+      const extras = item.withMargin.processor + item.withMargin.freight + item.withMargin.technicalVisit + item.withMargin.extendedWarranty;
+      doc.setFillColor(5, 13, 28);
+      doc.setDrawColor(24, 228, 255);
+      doc.roundedRect(16, screenY, 178, 42, 3, 3, "FD");
+      doc.setTextColor(24, 228, 255);
+      doc.setFontSize(8);
+      doc.text(`TELA ${index + 1}`, 22, screenY + 9);
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.text(screen.label, 22, screenY + 18);
+      doc.setFontSize(8);
+      doc.setTextColor(190, 205, 220);
+      doc.text(`Painel: ${formatBRL(item.withMargin.panel)}`, 22, screenY + 29);
+      doc.text(`Estrutura: ${formatBRL(item.withMargin.structure)}`, 76, screenY + 29);
+      doc.text(`Instalação: ${formatBRL(item.withMargin.installation)}`, 130, screenY + 29);
+      doc.text(`Outros: ${formatBRL(extras)}`, 22, screenY + 37);
+      doc.setTextColor(24, 228, 255);
+      doc.setFontSize(12);
+      doc.text(formatBRL(item.subtotal), 188, screenY + 17, { align: "right" });
+      screenY += 50;
+    });
+    doc.setFillColor(24, 228, 255);
+    doc.roundedRect(16, screenY + 4, 178, 28, 3, 3, "F");
+    doc.setTextColor(2, 6, 23);
+    doc.setFontSize(10);
+    doc.text("Subtotal de todas as telas", 22, screenY + 16);
+    doc.text(`Desconto geral: -${formatBRL(totals.discountValue)}`, 22, screenY + 25);
+    doc.setFontSize(18);
+    doc.text(formatBRL(totals.total), 188, screenY + 21, { align: "right" });
+  }
+
   doc.addPage();
   header("Composição comercial", "Garantia, resistências e valores finais");
   neonPanel(16, 56, 178, 42, "Garantia · Vida útil · Resistências");
@@ -1845,6 +2044,37 @@ async function exportQuotePdf(quote: Quote) {
   doc.setTextColor(190, 205, 220);
   doc.setFontSize(9);
   doc.text(doc.splitTextToSize("Garantia, vida util e condicoes comerciais seguem a validacao tecnica e o aceite formal da proposta. Esta apresentacao nao exibe custos internos da Boreal ou do parceiro.", 178), 16, y + 48);
+  if (quote.paymentOptions?.length) {
+    doc.addPage();
+    header("Condições de pagamento", "Alternativas personalizadas para negociação");
+    let paymentY = 62;
+    quote.paymentOptions.forEach((option, index) => {
+      const parts: string[] = [];
+      if (option.cashAmount > 0) parts.push(`À vista: ${formatBRL(option.cashAmount)}`);
+      if (option.downPayment > 0) parts.push(`Entrada: ${formatBRL(option.downPayment)}`);
+      if (option.installmentCount > 0 && option.installmentAmount > 0) parts.push(`${option.installmentCount} parcela(s) de ${formatBRL(option.installmentAmount)}`);
+      const optionTotal = option.cashAmount || option.downPayment + option.installmentCount * option.installmentAmount;
+      const cardHeight = option.notes ? 45 : 36;
+      doc.setFillColor(5, 13, 28);
+      doc.setDrawColor(24, 228, 255);
+      doc.roundedRect(16, paymentY, 178, cardHeight, 3, 3, "FD");
+      doc.setTextColor(24, 228, 255);
+      doc.setFontSize(8);
+      doc.text(`OPÇÃO ${index + 1}`, 22, paymentY + 9);
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14);
+      doc.text(option.label || `Opção ${index + 1}`, 22, paymentY + 18);
+      doc.setFontSize(10);
+      doc.text(parts.join(" + ") || "Condição a negociar", 22, paymentY + 27);
+      if (optionTotal > 0) doc.text(`Total: ${formatBRL(optionTotal)}`, 188, paymentY + 18, { align: "right" });
+      if (option.notes) {
+        doc.setTextColor(190, 205, 220);
+        doc.setFontSize(8);
+        doc.text(doc.splitTextToSize(option.notes, 164), 22, paymentY + 36);
+      }
+      paymentY += cardHeight + 8;
+    });
+  }
   doc.save(`${quote.quoteNumber}.pdf`);
 }
 

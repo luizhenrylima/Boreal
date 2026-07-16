@@ -148,6 +148,62 @@ export function calculateQuoteTotal({
   };
 }
 
+export type CommercialScreen = {
+  area: number;
+  pricePerSqm: number;
+  category: Category;
+  includeStructure: boolean;
+  includeInstallation: boolean;
+  includeProcessor: boolean;
+  includeFreight: boolean;
+  includeTechnicalVisit: boolean;
+  includeExtendedWarranty: boolean;
+  structureBaseCost?: number;
+  installationBaseCost?: number;
+  processorCost: number;
+  freightCost: number;
+  technicalVisitCost: number;
+  extendedWarrantyCost: number;
+};
+
+export function calculateProjectTotal(items: CommercialScreen[], marginPercent: number, discountPercent: number) {
+  const itemTotals = items.map((item) => calculateQuoteTotal({ ...item, marginPercent, discountPercent: 0 }));
+  const base = itemTotals.reduce((total, item) => ({
+    panelSubtotal: total.panelSubtotal + item.base.panelSubtotal,
+    structureBaseCost: total.structureBaseCost + item.base.structureBaseCost,
+    installationBaseCost: total.installationBaseCost + item.base.installationBaseCost,
+    processorCost: total.processorCost + item.base.processorCost,
+    freightCost: total.freightCost + item.base.freightCost,
+    technicalVisitCost: total.technicalVisitCost + item.base.technicalVisitCost,
+    extendedWarrantyCost: total.extendedWarrantyCost + item.base.extendedWarrantyCost,
+  }), { panelSubtotal: 0, structureBaseCost: 0, installationBaseCost: 0, processorCost: 0, freightCost: 0, technicalVisitCost: 0, extendedWarrantyCost: 0 });
+  const withMargin = itemTotals.reduce((total, item) => ({
+    panel: total.panel + item.withMargin.panel,
+    structure: total.structure + item.withMargin.structure,
+    installation: total.installation + item.withMargin.installation,
+    processor: total.processor + item.withMargin.processor,
+    freight: total.freight + item.withMargin.freight,
+    technicalVisit: total.technicalVisit + item.withMargin.technicalVisit,
+    extendedWarranty: total.extendedWarranty + item.withMargin.extendedWarranty,
+  }), { panel: 0, structure: 0, installation: 0, processor: 0, freight: 0, technicalVisit: 0, extendedWarranty: 0 });
+  const subtotal = Object.values(withMargin).reduce((sum, value) => sum + value, 0);
+  const discountValue = subtotal * (discountPercent / 100);
+  const baseTotal = Object.values(base).reduce((sum, value) => sum + value, 0);
+  return {
+    items: itemTotals,
+    base,
+    withMargin,
+    subtotal: moneyValue(subtotal),
+    discountValue: moneyValue(discountValue),
+    total: moneyValue(subtotal - discountValue),
+    internalMarginValue: moneyValue(subtotal - baseTotal),
+  };
+}
+
+function moneyValue(value: number) {
+  return Number(value.toFixed(2));
+}
+
 export function normalizeDocument(document: string) {
   return document.replace(/\D/g, "");
 }
