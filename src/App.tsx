@@ -98,6 +98,8 @@ type Draft = {
   includeExtendedWarranty: boolean;
   structureBaseCost: number;
   installationBaseCost: number;
+  processorName: string;
+  hideProcessorInQuote: boolean;
   processorCost: number;
   freightCost: number;
   technicalVisitCost: number;
@@ -144,6 +146,8 @@ const initialDraft: Draft = {
   includeExtendedWarranty: false,
   structureBaseCost: 4050,
   installationBaseCost: 2430,
+  processorName: "",
+  hideProcessorInQuote: false,
   processorCost: 0,
   freightCost: 0,
   technicalVisitCost: 1200,
@@ -315,6 +319,10 @@ function money(value: number) {
 
 function sameMoney(left: number, right: number) {
   return money(left) === money(right);
+}
+
+function processorDisplayName(processorName: string | undefined, fallback: string) {
+  return processorName?.trim() || fallback;
 }
 
 function getDefaultServiceBaseCosts(draft: Pick<Draft, "width" | "height" | "productId" | "category">, products: Product[]) {
@@ -650,6 +658,8 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         includeExtendedWarranty: editingQuote.includeExtendedWarranty,
         structureBaseCost: editingQuote.structureBaseCost ?? editingServiceDefaults?.structureBaseCost ?? initialDraft.structureBaseCost,
         installationBaseCost: editingQuote.installationBaseCost ?? editingServiceDefaults?.installationBaseCost ?? initialDraft.installationBaseCost,
+        processorName: editingQuote.processorName ?? "",
+        hideProcessorInQuote: Boolean(editingQuote.hideProcessorInQuote),
         processorCost: editingQuote.processorCost,
         freightCost: editingQuote.freightCost,
         technicalVisitCost: editingQuote.technicalVisitCost,
@@ -750,6 +760,8 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         includeExtendedWarranty: draft.includeExtendedWarranty,
         structureBaseCost: draft.includeStructure ? draft.structureBaseCost : 0,
         installationBaseCost: draft.includeInstallation ? draft.installationBaseCost : 0,
+        processorName: processorDisplayName(draft.processorName, math.processor.name),
+        hideProcessorInQuote: draft.hideProcessorInQuote,
         processorCost: draft.processorCost,
         freightCost: draft.freightCost,
         technicalVisitCost: draft.technicalVisitCost,
@@ -888,7 +900,23 @@ function QuoteWizard({ editingQuote, onDone }: { editingQuote?: Quote | null; on
         </div>
       )}
 
-      {step === 4 && <QuoteTechnicalCards draft={draft} processingOnly />}
+      {step === 4 && (
+        <div className="grid gap-4 lg:grid-cols-[1fr_.85fr]">
+          <QuoteTechnicalCards draft={draft} processingOnly />
+          <div className="neon-card grid gap-4 p-5">
+            <h2 className="text-xl font-bold text-white">Processadora na cotação</h2>
+            <Toggle label="Ocultar processadora na cotação" checked={draft.hideProcessorInQuote} onChange={(value) => update("hideProcessorInQuote", value)} />
+            <Input
+              label="Modelo da processadora"
+              value={draft.processorName || math.processor.name}
+              onChange={(value) => update("processorName", value)}
+            />
+            <p className="text-sm text-slate-300">
+              A sugestão automática é {math.processor.name}. Você pode trocar o modelo exibido no PDF ou ocultar a informação comercialmente.
+            </p>
+          </div>
+        </div>
+      )}
 
       {step === 5 && (
         <div className="grid gap-4 lg:grid-cols-[1fr_.9fr]">
@@ -1064,6 +1092,7 @@ function PaymentOptionsEditor({ options, onChange, quoteTotal }: { options: Paym
 
 function QuoteTechnicalCards({ draft, processingOnly = false }: { draft: Draft; processingOnly?: boolean }) {
   const math = useQuoteMath(draft);
+  const displayProcessorName = processorDisplayName(draft.processorName, math.processor.name);
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {!processingOnly && (
@@ -1095,6 +1124,7 @@ function QuoteTechnicalCards({ draft, processingOnly = false }: { draft: Draft; 
         <dl className="mt-4 grid gap-3 text-sm text-slate-300">
           <Info label="Marca" value={math.processor.brand} />
           <Info label="Modelo sugerido" value={math.processor.name} />
+          <Info label="Modelo na cotação" value={draft.hideProcessorInQuote ? "Oculto" : displayProcessorName} />
           <Info label="Portas disponíveis" value={String(math.processor.ports)} />
           <Info label="Portas necessárias" value={String(math.pixelLoad.requiredPorts)} />
           <Info label="Status" value={math.processor.note ? "Projeto especial" : "Compatível"} />
@@ -1181,12 +1211,13 @@ function PriceCalculator({ draft, showInternal = false }: { draft: Draft; showIn
 
 function QuoteSummary({ draft }: { draft: Draft }) {
   const math = useQuoteMath(draft);
+  const displayProcessorName = processorDisplayName(draft.processorName, math.processor.name);
   const cards = [
     ["Cliente", `${draft.name || "Cliente não informado"} · ${draft.city}/${draft.state}`, draft.projectName || "Projeto sem nome"],
     ["Produto", `${math.product.technology} ${math.product.pixelPitch}`, `NovaStar · Gabinete ${math.product.cabinetSize ?? "sob projeto"}`],
     ["Medidas", `${draft.width.toFixed(2)} x ${draft.height.toFixed(2)} m`, `${math.area.toFixed(2)} m² · ${math.formatType}`],
     ["Carga de pixels", math.pixelLoad.totalPixels.toLocaleString("pt-BR"), `${math.pixelLoad.requiredPorts} portas necessárias`],
-    ["Processadora", math.processor.name, `${math.processor.ports} portas disponíveis · ${math.processor.note ? "Validação técnica" : "Compatível"}`],
+    ["Processadora", draft.hideProcessorInQuote ? "Oculta na cotação" : displayProcessorName, `${math.processor.ports} portas disponíveis · ${math.processor.note ? "Validação técnica" : "Compatível"}`],
     ["Serviços", "Estrutura, instalação e adicionais", "Valores finais com margem interna aplicada"],
     ["Pagamento", draft.paymentOptions.length ? `${draft.paymentOptions.length} opção(ões) personalizada(s)` : "Condição a negociar", draft.paymentOptions.map((option) => option.label).join(" · ") || "Defina as condições antes de gerar a proposta"],
     ["Garantia e confiabilidade", "Até 100.000 horas", "Operação contínua · manutenção facilitada"],
@@ -1313,6 +1344,9 @@ function QuotesPage({ onEdit }: { onEdit: (quote: Quote) => void }) {
               const area = calculateArea(quote.width, quote.height);
               const pixels = calculatePixelLoad(quote.width, quote.height, quote.product.pixelPitchMm);
               const processor = suggestProcessor(pixels.requiredPorts);
+              const displayProcessorName = quote.hideProcessorInQuote
+                ? "Oculta"
+                : processorDisplayName(quote.processorName, processor.name);
               const total = calculateQuoteTotal({
                 area,
                 pricePerSqm: quote.product.pricePerSqm,
@@ -1339,7 +1373,7 @@ function QuotesPage({ onEdit }: { onEdit: (quote: Quote) => void }) {
                   <td className="px-4 py-3"><StatusBadge status={quote.status} /></td>
                   <td className="px-4 py-3">{quote.product.technology} {quote.product.pixelPitch}</td>
                   <td className="px-4 py-3">{detectFormat(quote.width, quote.height)}</td>
-                  <td className="px-4 py-3">{processor.name}</td>
+                  <td className="px-4 py-3">{displayProcessorName}</td>
                   <td className="px-4 py-3">{formatBRL(total)}</td>
                   <td className="px-4 py-3">{new Date(quote.createdAt).toLocaleDateString("pt-BR")}</td>
                   <td className="px-4 py-3">
@@ -1742,6 +1776,7 @@ async function exportQuotePdf(quote: Quote) {
   const area = calculateArea(quote.width, quote.height);
   const pixelLoad = calculatePixelLoad(quote.width, quote.height, quote.product.pixelPitchMm);
   const processor = suggestProcessor(pixelLoad.requiredPorts);
+  const displayProcessorName = processorDisplayName(quote.processorName, processor.name);
   const totals = calculateProjectTotal([{
     area, pricePerSqm: quote.product.pricePerSqm, category: quote.product.category,
     includeStructure: quote.includeStructure, includeInstallation: quote.includeInstallation,
@@ -1894,12 +1929,16 @@ async function exportQuotePdf(quote: Quote) {
   doc.setFontSize(20);
   doc.text(String(screenEntries.length), 112, 205);
   doc.text(screenEntries.reduce((sum, screen) => sum + calculateArea(screen.width, screen.height), 0).toFixed(2), 142, 205);
-  doc.text(String(pixelLoad.requiredPorts), 181, 205);
+  if (!quote.hideProcessorInQuote) {
+    doc.text(String(pixelLoad.requiredPorts), 181, 205);
+  }
   doc.setTextColor(190, 205, 220);
   doc.setFontSize(7);
   doc.text("PAINEIS", 112, 211);
   doc.text("M2 TOTAL", 142, 211);
-  doc.text("PROC.", 181, 211);
+  if (!quote.hideProcessorInQuote) {
+    doc.text("PROC.", 181, 211);
+  }
 
   neonPanel(16, 222, 178, 38, "Paineis LED");
   doc.setFillColor(8, 18, 36);
@@ -1930,17 +1969,23 @@ async function exportQuotePdf(quote: Quote) {
     ["Frete", totals.withMargin.freight],
     ["Serviços técnicos", totals.withMargin.technicalVisit + totals.withMargin.extendedWarranty],
     ["Desconto", totals.discountValue],
-  ].filter(([, value]) => Number(value) > 0);
+  ].filter(([label, value]) => label !== "Processadora" || (!quote.hideProcessorInQuote && Number(value) > 0)).filter(([, value]) => Number(value) > 0);
 
   doc.addPage();
-  header("Resumo técnico", "Dimensionamento do painel, pixels e processamento");
+  header("Resumo técnico", quote.hideProcessorInQuote ? "Dimensionamento do painel e pixels" : "Dimensionamento do painel, pixels e processamento");
   infoRow("Produto", `${quote.product.technology} ${quote.product.pixelPitch}`, 16, 54, 82);
   infoRow("Medida", `${quote.width.toFixed(2)} x ${quote.height.toFixed(2)} m`, 106, 54, 88);
   infoRow("Área", `${area.toFixed(2)} m2`, 16, 76, 52);
   infoRow("Resolução", `${pixelLoad.pixelsWidth} x ${pixelLoad.pixelsHeight} px`, 74, 76, 62);
-  infoRow("Portas", String(pixelLoad.requiredPorts), 142, 76, 52);
-  infoRow("Processadora", processor.name, 16, 98, 82);
-  infoRow("Formato", detectFormat(quote.width, quote.height), 106, 98, 88);
+  if (!quote.hideProcessorInQuote) {
+    infoRow("Portas", String(pixelLoad.requiredPorts), 142, 76, 52);
+  }
+  if (quote.hideProcessorInQuote) {
+    infoRow("Formato", detectFormat(quote.width, quote.height), 16, 98, 178);
+  } else {
+    infoRow("Processadora", displayProcessorName, 16, 98, 82);
+    infoRow("Formato", detectFormat(quote.width, quote.height), 106, 98, 88);
+  }
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(13);
